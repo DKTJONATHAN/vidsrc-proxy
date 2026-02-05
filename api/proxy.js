@@ -1,6 +1,9 @@
 export default async function handler(req, res) {
     const targetBase = "https://vidsrc.xyz";
-    const targetUrl = targetBase + req.url;
+    
+    // Ensure we don't double up on slashes
+    const path = req.url.startsWith('/') ? req.url : `/${req.url}`;
+    const targetUrl = `${targetBase}${path}`;
 
     try {
         const response = await fetch(targetUrl, {
@@ -10,38 +13,37 @@ export default async function handler(req, res) {
             }
         });
 
-        const contentType = response.headers.get('content-type');
-        res.setHeader('Content-Type', contentType || 'text/html');
+        const contentType = response.headers.get('content-type') || '';
         res.setHeader('Access-Control-Allow-Origin', '*');
 
-        if (contentType && contentType.includes('text/html')) {
+        if (contentType.includes('text/html')) {
             let html = await response.text();
             
-            // The "Ad-Killer" Shield
             const adShield = `
             <script>
                 (function() {
                     window.open = function() { return null; };
                     const clean = () => {
-                        document.querySelectorAll('script[src*="ads"], script[src*="pop"], iframe[src*="ads"]').forEach(el => el.remove());
+                        document.querySelectorAll('script[src*="ads"], script[src*="pop"], iframe[src*="ads"], .ad-banner').forEach(el => el.remove());
                     };
                     setInterval(clean, 500);
                 })();
             </script>`;
 
-            // Fix relative paths to absolute ones
             html = html.replace('<head>', '<head>' + adShield)
-                       .split('src="/').join(`src="${targetBase}/`)
-                       .split('href="/').join(`href="${targetBase}/`)
-                       .split('url(/').join(`url(${targetBase}/`);
+                       .replaceAll('src="/', `src="${targetBase}/`)
+                       .replaceAll('href="/', `href="${targetBase}/`)
+                       .replaceAll('url(/', `url(${targetBase}/`);
 
+            res.setHeader('Content-Type', 'text/html');
             return res.status(200).send(html);
         } else {
-            // For JS/CSS/Videos, pipe the data directly
-            const blob = await response.arrayBuffer();
-            return res.status(200).send(Buffer.from(blob));
+            const arrayBuffer = await response.arrayBuffer();
+            res.setHeader('Content-Type', contentType);
+            return res.status(200).send(Buffer.from(arrayBuffer));
         }
     } catch (e) {
+        console.error(e);
         return res.status(500).send("Proxy error: " + e.message);
     }
 }
