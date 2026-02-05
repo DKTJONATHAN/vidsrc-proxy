@@ -1,9 +1,14 @@
+// api/proxy.js - 2026 Domain Update
 export default async function handler(req, res) {
-    const targetBase = "https://vidsrc.xyz";
+    // Switching to the domain recommended in their announcement
+    const targetBase = "https://vidsrc-embed.su"; 
     
-    // Ensure we don't double up on slashes
-    const path = req.url.startsWith('/') ? req.url : `/${req.url}`;
-    const targetUrl = `${targetBase}${path}`;
+    // Safety check: ensure we aren't fetching the root landing page
+    if (!req.url || req.url === "/" || req.url.includes("api/proxy")) {
+        return res.status(400).send("No TMDB ID provided. Usage: /embed/movie/ID");
+    }
+
+    const targetUrl = targetBase + req.url;
 
     try {
         const response = await fetch(targetUrl, {
@@ -19,17 +24,19 @@ export default async function handler(req, res) {
         if (contentType.includes('text/html')) {
             let html = await response.text();
             
+            // Script to neutralize ads within the proxied HTML
             const adShield = `
             <script>
                 (function() {
                     window.open = function() { return null; };
-                    const clean = () => {
-                        document.querySelectorAll('script[src*="ads"], script[src*="pop"], iframe[src*="ads"], .ad-banner').forEach(el => el.remove());
+                    const killAds = () => {
+                        document.querySelectorAll('script[src*="ads"], script[src*="pop"], iframe[src*="ads"]').forEach(el => el.remove());
                     };
-                    setInterval(clean, 500);
+                    setInterval(killAds, 750);
                 })();
             </script>`;
 
+            // Inject shield and map relative paths to the new .su domain
             html = html.replace('<head>', '<head>' + adShield)
                        .replaceAll('src="/', `src="${targetBase}/`)
                        .replaceAll('href="/', `href="${targetBase}/`)
@@ -38,12 +45,12 @@ export default async function handler(req, res) {
             res.setHeader('Content-Type', 'text/html');
             return res.status(200).send(html);
         } else {
-            const arrayBuffer = await response.arrayBuffer();
+            // Forward JS/CSS/Images/Segments directly
+            const buffer = await response.arrayBuffer();
             res.setHeader('Content-Type', contentType);
-            return res.status(200).send(Buffer.from(arrayBuffer));
+            return res.status(200).send(Buffer.from(buffer));
         }
     } catch (e) {
-        console.error(e);
         return res.status(500).send("Proxy error: " + e.message);
     }
 }
